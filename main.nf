@@ -222,7 +222,7 @@ process fastqc {
 /*
  * PREPROCESSING - Build STAR index
  */
-if(params.aligner == 'star' && !params.star_index && fasta){
+if(!params.star_index && fasta){
     process makeSTARindex {
         tag fasta
         publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
@@ -249,10 +249,7 @@ if(params.aligner == 'star' && !params.star_index && fasta){
     }
 }
 
-/**
- * Preprocessing - Build Bowtie index
- *
- */
+
 if(params.aligner == 'bowtie' && !params.bowtie_index && fasta){
     process buildBowtieIndex {
         tag fasta
@@ -363,56 +360,10 @@ if(params.trimming){
     }
 }
 
-/**
- * PREPROCESSING - Remove added G from 5-end
- */
-if (params.cutG){
-
-    input:
-    file reads from trimmed_reads_cutG
-
-    output:
-    file "*.fastq.gz" into processed_reads
-
-    script:
-    """
-    cutadapt -g ^G \\
-    -e 0 --match-read-wildcards \\
-    -o ${reads.baseName}.processed.fastq.gz \\
-    $reads
-    """
-
-}
 
 /**
  * READ MAPPING
  */
-if (params.aligner == 'bowtie'){
-    process bowtie {
-        publishDir "${params.outdir}/Bowtie", mode: 'copy'
-
-        input:
-        file reads from trimmed_reads_bowtie
-        file gtf from gtf_bowtie.collect()
-        file index from bowtie_index.collect()
-
-        output:
-        file '*.bam' into bowtie_aligned
-
-        script:
-        """
-        bowtie -p ${task.cpus} \\
-        --sam \\
-        ${index}/btw_idx \\
-        $reads \\
-        > ${reads.baseName}.sam 2> ${reads.baseName}.aln.log
-        samtools view -Sb ${reads.baseName}.sam ${reads.baseName}.bam
-        """
-    }
-    // Split Bowtie results
-    bowtie_aligned.into { bam_count; bam_rseqc }
-}
-else if (params.aligner == 'star'){
     process star {
         tag "$prefix"
         publishDir "${params.outdir}/STAR", mode: 'copy',
@@ -443,11 +394,10 @@ else if (params.aligner == 'star'){
             --runDirPerm All_RWX \\
             --outFileNamePrefix $prefix \\
             --outFilterMatchNmin ${params.min_aln_length}
-        """
-    }
-    // Split Star results
-    star_aligned.into { bam_count; bam_rseqc }
-}
+         """ }
+// Split Star results
+star_aligned.into { bam_count; bam_rseqc }
+
 
 /**
  * Mapping QC
@@ -473,47 +423,6 @@ process rseqc {
 }
 
 
-
-/**
- * STEP 5 Get CTSS files
- */
-process get_ctss {
-    tag "${bam_count.baseName}"
-    publishDir "${params.outdir}/ctss", mode: 'copy'
-
-    input:
-    file bam_count
-
-    output:
-    file "*.ctss" into ctss_counts
-    file "*.bed" into bed_aln
-
-    script:
-    """
-    samtools view  -F 4 -q 10 -b $bam_count > ${bam_count.baseName}.unique.bam
-    bedtools bamtobed -i ${bam_count.baseName}.unique.bam > ${bam_count.baseName}.bed
-    get_ctss.py ${bam_count.baseName}.bed ${bam_count.baseName}.ctss
-    """
-}
-
-/**
- * STEP 6 Cluster CTSS with paraclu
- */
-process paraclu {
-    tag "${ctss.baseName}"
-    publishDir "${params.outdir}/paraclu", mode: 'copy'
-
-    input:
-    file ctss from ctss_counts
-
-    output:
-    file "*" into paraclu_output
-
-    script:
-    """
-    paraclu $params.para_min $ctss > ${ctss.baseName}.clst
-    """
-}
 
 
 /**

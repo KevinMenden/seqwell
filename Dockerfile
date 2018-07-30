@@ -5,17 +5,7 @@ LABEL authors="kevin.menden@dzne.de" \
 
 COPY environment.yml /
 RUN conda env create -f /environment.yml && conda clean -a
-ENV PATH /opt/conda/envs/nf-cageseq/bin:$PATH
+ENV PATH /opt/conda/envs/seqwell/bin:$PATH
 
-# Install paraclu
-RUN apt-get update && apt-get install -y make g++ unzip
-RUN curl -fsSL cbrc3.cbrc.jp/~martin/paraclu/paraclu-9.zip -o /opt/paraclu-9.zip
-RUN cd /opt/; unzip paraclu-9.zip; cd paraclu-9; make
-ENV PATH $PATH:/opt/paraclu-9/
 
-## Install R
-#RUN apt-get update && apt-get install -y r-base
-#
-## Install RECLU
-#COPY /assets/reclu_nfcageseq /opt/reclu_nfcageseq
-#ENV PATH $PATH:/opt/reclu_nfcageseq
+
