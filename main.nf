@@ -235,6 +235,8 @@ process fastqToBam {
 
 /*
 STEP 3 Tag bam file
+Use R1 to tag each read according to cell and molecular barcode
+Filter for reads with low quality barcodes
  */
 process tagbam {
     publishDir "${params.outdir}/bam", mode: 'copy'
@@ -267,7 +269,67 @@ process tagbam {
     TAG_NAME=XM \\
     NUM_BASES_BELOW_QUALITY=1
 
+    FilerBam \\
+    TAG_REJECT=XQ \\
+    INPUT=unaligned_tagged_CellMolecular.bam \\
+    OUTPUT=unaligned_tagged_filtered.bam
     """
+
+    output:
+    file "*tagged_filtered.bam" into tagged_bam
+    ""
+}
+
+/*
+STEP 4 Read trimming
+ */
+process trimming {
+    publishDir "${params.outdir}/bam", mode: 'copy'
+
+    input:
+    file tbam from tagged_bam
+
+    script:
+    """
+    TrimStartingSequence \\
+    INPUT=$tbam \\
+    OUTPUT=unaligned_tagged_trimmed_smart.bam \\
+    OUTPUT_SUMMARY=adapter_trimming_report.txt \\
+    SEQUENCE=AAGCAGTGGTATCAACGCAGAGTGAATGGG \\
+    MISMATCHES=0 \\
+    NUM_BASES=5
+    
+    PolyATrimmer \\
+    INPUT=unaligned_tagged_trimmed_smart.bam \\
+    OUTPUT=unaligned_mc_tagged_polyA_filtered.bam \\
+    OUTPUT_SUMMARY=polyA_trimming_report.txt \\
+    MISMATCHES=0 \\
+    NUM_BASES=6
+    """
+
+    output:
+    file "*mc_tagged_polyA_filtered.bam" into filtered_bam
+    file "*" into trimming results
+}
+
+/*
+STEP 5 Convert to Fastq
+ */
+process bamToFastq {
+    publishDir "${params.outdir}/fastq", mode: 'copy'
+
+    input:
+    file fbam from filtered_bam
+
+    script:
+    """
+    picard SamToFastq \\
+    INPUT=$fbam \\
+    FASTQ=unaligned_mc_tagged_filtered.fastq
+    """
+
+    output:
+    file "*fastq" into tagged_filtered_fastq
 }
 
 
@@ -297,96 +359,6 @@ if(!params.star_index && fasta){
             --sjdbOverhang 50 \\
             --genomeDir star/ \\
             --genomeFastaFiles $fasta
-        """
-    }
-}
-
-
-/*
- * PREPROCESSING - Cut Enzyme binding site at 5' and linker at 3'
- */
-if(params.trimming){
-    process trimming {
-        tag "$prefix"
-        publishDir "${params.outdir}/trimmed", mode: 'copy',
-                saveAs: {filename ->
-                    if (filename.indexOf(".fastq.gz") == -1)    "logs/$filename"
-                    else "$filename" }
-
-        input:
-        set val(name), file(reads) from read_files_trimming
-
-        output:
-        file "*.fastq.gz" into trimmed_reads
-        file "*.output.txt" into cutadapt_results
-
-        script:
-        prefix = reads.baseName.toString() - ~/(\.fq)?(\.fastq)?(\.gz)?$/
-        if(!params.pairedEnd){
-            if (params.cutEcop && params.cutLinker){
-                """
-                cutadapt -a ${params.ecoSite}...${params.linkerSeq} \\
-                --match-read-wildcards \\
-                -m 15 -M 45  \\
-                -o ${reads.baseName}.trimmed.fastq.gz \\
-                $reads \\
-                > ${reads.baseName}.trimming.output.txt
-                """
-            }
-            else if (params.cutEcop && !params.cutLinker){
-                """
-                mkdir trimmed
-                cutadapt -g ^${params.ecoSite} \\
-                -e 0 \\
-                --match-read-wildcards \\
-                --discard-untrimmed \\
-                -o ${reads.baseName}.trimmed.fastq.gz \\
-                $reads \\
-                > ${reads.baseName}.trimming.output.txt
-                """
-            }
-            else if (!params.cutEcop && params.cutLinker){
-                """
-                mkdir trimmed
-                cutadapt -a ${params.linkerSeq}\$ \\
-                -e 0 \\
-                --match-read-wildcards \\
-                -m 15 -M 45 \\
-                -o ${reads.baseName}.trimmed.fastq.gz \\
-                $reads \\
-                > ${reads.baseName}.trimming.output.txt
-                """
-            }
-
-        } else {
-            // CURRENTLY NOT SUPPORTED
-            """
-            mkdir trimmed
-            cutadapt reads
-            cutadapt -g %(sample)s=^%(barc)s -e 0 --no-indels %(fq_file)s -o
-            """
-        }
-
-    }
-    // Make channels for all downstream programs
-    trimmed_reads.into{ trimmed_fastqc_reads; trimmed_star_reads; trimmed_reads_bowtie; trimmed_reads_cutG }
-
-
-    // Post trimming QC
-    process trimmed_fastqc {
-        tag "${reads.baseName}"
-        publishDir "${params.outdir}/trimmed/fastqc", mode: 'copy',
-                saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
-
-        input:
-        file reads from trimmed_fastqc_reads
-
-        output:
-        file "*_fastqc.{zip,html}" into trimmed_fastqc_results
-
-        script:
-        """
-        fastqc -q $reads
         """
     }
 }
