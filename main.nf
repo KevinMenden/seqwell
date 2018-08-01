@@ -233,6 +233,42 @@ process fastqToBam {
 
 }
 
+/*
+STEP 3 Tag bam file
+ */
+process tagbam {
+    publishDir "${params.outdir}/bam", mode: 'copy'
+
+    input:
+    file ua_bam from fastq_to_bam_results
+
+    script:
+    """
+    TagBamWithReadSequenceExtended \\
+    INPUT=$ua_bam \\
+    OUTPUT=unaligned_tagged_Cell.bam \\
+    SUMMARY=unaligned_tagged_Cell.bam_summary.txt \\
+    BASE_RANGE=1-12 \\
+    BASE_QUALITY=10 \\
+    BARCODED_READ=1 \\
+    DISCARD_READ=False \\
+    TAG_NAME=XC \\
+    NUM_BASES_BELOW_QUALITY=1
+
+
+    TagBamWithReadSequenceExtended \\
+    INPUT=unaligned_tagged_Cell.bam \\
+    OUTPUT=unaligned_tagged_CellMolecular.bam \\
+    SUMMARY=unaligned_tagged_CellMolecular.bam_summary.txt \\
+    BASE_RANGE=13-20 \\
+    BASE_QUALITY=10 \\
+    BARCODED_READ=1 \\
+    DISCARD_READ=True \\
+    TAG_NAME=XM \\
+    NUM_BASES_BELOW_QUALITY=1
+
+    """
+}
 
 
 /*
