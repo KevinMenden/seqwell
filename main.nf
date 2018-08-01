@@ -100,7 +100,7 @@ params.pairedEnd = false
 Channel
     .fromFilePairs( params.reads, size: params.pairedEnd ? 2 : 1 )
     .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
-    .into { read_files_fastqc; read_files_trimming }
+    .into { read_files_fastqc; read_files_bam; read_files_trimming }
 
 log.info"""
 ${read_files_fastqc.length()}
@@ -164,12 +164,8 @@ if( params.gtf ){
             .ifEmpty { exit 1, "GTF annotation file not found: ${params.gtf}" }
             .into { gtf_makeSTARindex; gtf_star; gtf_bowtie; gtf_buildBowtieIndex}
 }
-// Choose aligner
-if (params.aligner != 'star'){
-    exit 1, "Invalid aligner option: ${params.aligner}. Valid options: 'star'"
-}
 // Load STAR index
-if ( params.star_index && params.aligner == 'star' ){
+if ( params.star_index){
     star_index = Channel
         .fromPath(params.star_index)
         .ifEmpty { exit 1, "STAR index not found: ${params.star_index}" }
@@ -217,6 +213,26 @@ process fastqc {
     """
 }
 
+/*
+STEP 2 - Create queryname sorted, unmapped BAM from FastQ files
+ */
+process fastqToBam {
+    tag "$name"
+    publishDir "${params.outdir}/bam", mode: 'copy'
+
+    input:
+    set val(name), file(reads), from read_files_bam
+
+    output:
+    file "*bam" into fastq_to_bam_results
+
+    script:
+    """
+    picard FastqToSam F1=${reads[0]} F2=${reads[1]} O=test.bam RG=null
+    """
+
+}
+
 
 
 /*
@@ -249,27 +265,6 @@ if(!params.star_index && fasta){
     }
 }
 
-
-if(params.aligner == 'bowtie' && !params.bowtie_index && fasta){
-    process buildBowtieIndex {
-        tag fasta
-        publishDir path: { params.saveReference ? "${params.outdir}/reference_genome" : params.outdir },
-                saveAs: { params.saveReference ? it : null }, mode: 'copy'
-
-        input:
-        file fasta from fasta
-        file gtf from gtf_buildBowtieIndex
-
-        output:
-        file "bowtie_index" into bowtie_index
-
-        script:
-        """
-        mkdir bowtie_index
-        bowtie-build $fasta -t ${task.cpus} bowtie_index/btw_idx 
-        """
-    }
-}
 
 /*
  * PREPROCESSING - Cut Enzyme binding site at 5' and linker at 3'
