@@ -10,14 +10,16 @@ dependencies:
   - picard=2.18.11=0
   - simplejson=3.8.1=py36_0
   - star=2.6.0c=1
+  - ca-certificates=2018.4.16=0
+  - certifi=2018.4.16=py36_0
   - colormath=3.0.0=py_2
   - lzstring=1.0.3=py36_0
+  - openjdk=8.0.144=zulu8.23.0.3_1
+  - openssl=1.0.2o=h470a237_1
   - perl=5.22.0.1=0
   - spectra=0.0.11=py_0
   - asn1crypto=0.24.0=py36_0
   - blas=1.0=mkl
-  - ca-certificates=2018.03.07=0
-  - certifi=2018.4.16=py36_0
   - cffi=1.11.5=py36h9745a5d_0
   - chardet=3.0.4=py36_1
   - click=6.7=py36_0
@@ -58,8 +60,6 @@ dependencies:
   - networkx=2.0=py36h7e96fb8_0
   - numpy=1.15.0=py36h1b885b7_0
   - numpy-base=1.15.0=py36h3dfced4_0
-  - openjdk=8.0.121=1
-  - openssl=1.0.2o=h20670df_0
   - pcre=8.42=h439df22_0
   - pip=10.0.1=py36_0
   - pycparser=2.18=py36_1
@@ -85,3 +85,4 @@ dependencies:
   - xz=5.2.4=h14c3975_4
   - yaml=0.1.7=had09818_2
   - zlib=1.2.11=ha838bed_2
+

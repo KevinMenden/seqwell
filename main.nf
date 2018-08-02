@@ -169,25 +169,25 @@ process get_software_versions {
 }
 
 
-/**
- * FastQC
- */
-process fastqc {
-    tag "$name"
-    publishDir "${params.outdir}/fastqc", mode: 'copy',
-        saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
-
-    input:
-    set val(name), file(reads) from read_files_fastqc
-
-    output:
-    file "*_fastqc.{zip,html}" into fastqc_results
-
-    script:
-    """
-    fastqc -q $reads -t ${task.cpus}
-    """
-}
+///**
+// * FastQC
+// */
+//process fastqc {
+//    tag "$name"
+//    publishDir "${params.outdir}/fastqc", mode: 'copy',
+//        saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
+//
+//    input:
+//    set val(name), file(reads) from read_files_fastqc
+//
+//    output:
+//    file "*_fastqc.{zip,html}" into fastqc_results
+//
+//    script:
+//    """
+//    fastqc $reads
+//    """
+//}
 
 
 /**
@@ -250,7 +250,7 @@ process tagbam {
     TAG_NAME=XM \\
     NUM_BASES_BELOW_QUALITY=1
 
-    FilerBam \\
+    FilterBAM \\
     TAG_REJECT=XQ \\
     INPUT=${ua_bam.baseName}.unaligned_tagged_CellMolecular.bam \\
     OUTPUT=${ua_bam.baseName}.unaligned_tagged_filtered.bam
@@ -391,7 +391,7 @@ if(params.build_dict){
 
         script:
         """
-        picard 
+        picard CreateSequenceDictionary R=$fasta O=${fasta.baseName}.dict
         """
     }
 }
@@ -473,34 +473,34 @@ process digitalGeneExpression {
 }
 
 
-/**
- * STEP7 MultiQC
- */
-
-// MultiQC of all the results
-process multiqc {
-    tag "$prefix"
-    publishDir "${params.outdir}/MultiQC", mode: 'copy'
-
-    input:
-    file multiqc_config
-    file ('fastqc/*') from fastqc_results.collect()
-    file ('software_versions/*') from software_versions_yaml
-    file ('alignment/*') from alignment_logs.collect()
-
-    output:
-    file "*multiqc_report.html" into multiqc_report
-    file "*_data"
-    val prefix into multiqc_prefix
-
-    script:
-    prefix = fastqc[0].toString() - '_fastqc.html' - 'fastqc/'
-    rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
-    rfilename = custom_runName ? "--filename " + custom_runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report" : ''
-    """
-    multiqc -f $rtitle $rfilename --config $multiqc_config .
-    """
-}
+///**
+// * STEP7 MultiQC
+// */
+//
+//// MultiQC of all the results
+//process multiqc {
+//    tag "$prefix"
+//    publishDir "${params.outdir}/MultiQC", mode: 'copy'
+//
+//    input:
+//    file multiqc_config
+//    file ('fastqc/*') from fastqc_results.collect()
+//    file ('software_versions/*') from software_versions_yaml
+//    file ('alignment/*') from alignment_logs.collect()
+//
+//    output:
+//    file "*multiqc_report.html" into multiqc_report
+//    file "*_data"
+//    val prefix into multiqc_prefix
+//
+//    script:
+//    prefix = fastqc[0].toString() - '_fastqc.html' - 'fastqc/'
+//    rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
+//    rfilename = custom_runName ? "--filename " + custom_runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report" : ''
+//    """
+//    multiqc -f $rtitle $rfilename --config $multiqc_config .
+//    """
+//}
 
 
 /*
