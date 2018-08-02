@@ -206,7 +206,7 @@ process fastqToBam {
     script:
     prefix = reads[0].toString() - ~/(.trimmed)?(\.fq)?(\.fastq)?(\.gz)?$/
     """
-    picard FastqToSam F1=${reads[0]} F2=${reads[1]} O=${prefix}.bam RG=null SM=$prefix
+    picard FastqToSam F1=${reads[0]} F2=${reads[1]} O=${prefix}.bam RG=null SM=$prefix SO=queryname
     """
 
 }
@@ -408,7 +408,7 @@ process sort_and_merge {
     file fasta from fasta
 
     output:
-    file "*bam" into merged_bam
+    file "*merged.bam" into merged_bam
 
     script:
     """
@@ -464,7 +464,7 @@ process tagGeneExon {
     file gtf from gtf_tag_exon
 
     output:
-    file "*bam" into exon_tagged_bam
+    file "*exonTagged.bam" into exon_tagged_bam
 
     script:
     """
@@ -493,7 +493,7 @@ process digitalGeneExpression {
     DigitalExpression \\
     I=$etbam \\
     O=${etbam.baseName}.dge.txt.gz \\
-    SUMMARY=${etbam.baseName}.dge.summary.txt
+    SUMMARY=${etbam.baseName}.dge.summary.txt \\
     MIN_NUM_GENES_PER_CELL=$params.min_genes 
     """
 }
