@@ -80,11 +80,10 @@ if( !(workflow.runName ==~ /[a-z]+_[a-z]+/) ){
 /*
  * Create a channel for input read files
  */
-params.pairedEnd = false
 Channel
-    .fromFilePairs( params.reads, size: params.pairedEnd ? 2 : 1 )
+    .fromFilePairs( params.reads, size: 2)
     .ifEmpty { exit 1, "Cannot find any reads matching: ${params.reads}\nNB: Path needs to be enclosed in quotes!\nNB: Path requires at least one * wildcard!\nIf this is single-end data, please specify --singleEnd on the command line." }
-    .into { read_files_fastqc; read_files_bam; read_files_trimming }
+    .into { read_files_fastqc; read_files_bam }
 
 log.info"""
 ${read_files_fastqc.length()}
@@ -100,11 +99,6 @@ def summary = [:]
 summary['Run Name']     = custom_runName ?: workflow.runName
 summary['Reads']        = params.reads
 summary['Fasta Ref']    = params.fasta
-summary['Data Type']    = params.pairedEnd ? 'Paired-End' : 'Single-End'
-summary['Aligner']      = params.aligner
-summary['Max Memory']   = params.max_memory
-summary['Max CPUs']     = params.max_cpus
-summary['Max Time']     = params.max_time
 summary['Output dir']   = params.outdir
 summary['Working dir']  = workflow.workDir
 summary['Container']    = workflow.container
@@ -204,7 +198,7 @@ process fastqToBam {
     publishDir "${params.outdir}/bam", mode: 'copy'
 
     input:
-    set val(name), file(reads), from read_files_bam
+    set val(name), file(reads) from read_files_bam
 
     output:
     file "*bam" into fastq_to_bam_results
@@ -272,6 +266,10 @@ process trimming {
     input:
     file tbam from tagged_bam
 
+    output:
+    file "*polyA_filtered.bam" into filtered_bam
+    file "*" into trimming_results
+
     script:
     """
     TrimStartingSequence \\
@@ -290,9 +288,7 @@ process trimming {
     NUM_BASES=6
     """
 
-    output:
-    file "*polyA_filtered.bam" into filtered_bam
-    file "*" into trimming_results
+
 }
 filtered_bam.into { filtered_bam_fastq; filtered_bam_merge }
 
@@ -463,7 +459,7 @@ process digitalGeneExpression {
     file etbam from exon_tagged_bam
 
     output:
-    "*" into dge_matrix
+    file "*" into dge_matrix
 
     script:
     """
@@ -479,29 +475,6 @@ process digitalGeneExpression {
 /**
  * STEP7 MultiQC
  */
-
-// MultiQC of non-trimmed fastq files
-process multiqc_notrim {
-    tag "$prefix"
-    publishDir "${params.outdir}/MultiQC/notrim", mode: 'copy'
-
-    input:
-    file multiqc_config
-    file (fastqc:'fastqc/*') from fastqc_results.collect()
-
-    output:
-    file "*multiqc_report.html" into multiqc_report_notrim
-    file "*_data"
-    val prefix into multiqc_prefix_notrim
-
-    script:
-    prefix = fastqc[0].toString() - '_fastqc.html' - 'fastqc/'
-    rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
-    rfilename = custom_runName ? "--filename " + custom_runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report" : ''
-    """
-    multiqc -f $rtitle $rfilename --config $multiqc_config .
-    """
-}
 
 // MultiQC of all the results
 process multiqc {
