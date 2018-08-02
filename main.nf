@@ -185,7 +185,7 @@ process fastqc {
 
     script:
     """
-    fastqc -q $reads
+    fastqc -q $reads -t ${task.cpus}
     """
 }
 
@@ -204,8 +204,9 @@ process fastqToBam {
     file "*bam" into fastq_to_bam_results
 
     script:
+    prefix = reads[0].toString() - ~/(.trimmed)?(\.fq)?(\.fastq)?(\.gz)?$/
     """
-    picard FastqToSam F1=${reads[0]} F2=${reads[1]} O=${reads[0].baseName}.bam RG=null
+    picard FastqToSam F1=${reads[0]} F2=${reads[1]} O=${prefix}.bam RG=null SM=$prefix
     """
 
 }
