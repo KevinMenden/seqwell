@@ -309,7 +309,7 @@ process bamToFastq {
     """
     picard SamToFastq \\
     INPUT=$fbam \\
-    FASTQ=${$fbam}.fastq
+    FASTQ=${fbam}.fastq
     """
 
 
