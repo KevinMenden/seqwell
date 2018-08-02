@@ -169,25 +169,25 @@ process get_software_versions {
 }
 
 
-///**
-// * FastQC
-// */
-//process fastqc {
-//    tag "$name"
-//    publishDir "${params.outdir}/fastqc", mode: 'copy',
-//        saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
-//
-//    input:
-//    set val(name), file(reads) from read_files_fastqc
-//
-//    output:
-//    file "*_fastqc.{zip,html}" into fastqc_results
-//
-//    script:
-//    """
-//    fastqc $reads
-//    """
-//}
+/**
+ * FastQC
+ */
+process fastqc {
+    tag "$name"
+    publishDir "${params.outdir}/fastqc", mode: 'copy',
+        saveAs: {filename -> filename.indexOf(".zip") > 0 ? "zips/$filename" : "$filename"}
+
+    input:
+    set val(name), file(reads) from read_files_fastqc
+
+    output:
+    file "*_fastqc.{zip,html}" into fastqc_results
+
+    script:
+    """
+    fastqc $reads
+    """
+}
 
 
 /**
@@ -291,7 +291,7 @@ process trimming {
 
 
 }
-filtered_bam.into { filtered_bam_fastq; filtered_bam_merge }
+filtered_bam.into { filtered_bam_fastq; filtered_bam_merged }
 
 /**
  * Convert back to FastQ
@@ -404,7 +404,7 @@ process sort_and_merge {
 
     input:
     file mapped_sam from star_aligned
-    file fbam from filtered_bam_merge
+    file fbam from filtered_bam_merged
     file fasta from fasta
 
     output:
@@ -412,6 +412,8 @@ process sort_and_merge {
 
     script:
     """
+    picard CreateSequenceDictionary R=$fasta O=${fasta.baseName}.dict
+    
     picard SortSam \\
     I=$mapped_sam \\
     O=${mapped_sam.baseName}.sorted.bam \\
@@ -428,13 +430,37 @@ process sort_and_merge {
 }
 
 /**
+ * Detect bead synthesis errors
+ */
+process detectSynthesisErrors {
+    publishDir "${params.outdir}/STAR", mode: 'copy'
+
+    input:
+    file dirty_bam from merged_bam
+
+    output:
+    file "*.bam" into clean_bam
+
+    script:
+    """
+    DetectBeadSynthesisErrors \\
+    I=$dirty_bam \\
+    O=${dirty_bam.baseName}.clean.bam \\
+    OUTPUT_STATS=${dirty_bam.baseName}.synthesis.stats.txt \\
+    SUMMARY=${dirty_bam.baseName}.synthesis_summary.txt \\
+    NUM_BARCODES=30000 \\
+    PRIMER_SEQUENCE=AAGCAGTGGTATCAACGCAGAGT
+    """
+}
+
+/**
  * Tag Read with Gene Exon
  */
 process tagGeneExon {
     publishDir "${params.outdir}/Counts", mode: 'copy'
 
     input:
-    file mbam from merged_bam
+    file mbam from clean_bam
     file gtf from gtf_tag_exon
 
     output:
@@ -473,34 +499,34 @@ process digitalGeneExpression {
 }
 
 
-///**
-// * STEP7 MultiQC
-// */
-//
-//// MultiQC of all the results
-//process multiqc {
-//    tag "$prefix"
-//    publishDir "${params.outdir}/MultiQC", mode: 'copy'
-//
-//    input:
-//    file multiqc_config
-//    file ('fastqc/*') from fastqc_results.collect()
-//    file ('software_versions/*') from software_versions_yaml
-//    file ('alignment/*') from alignment_logs.collect()
-//
-//    output:
-//    file "*multiqc_report.html" into multiqc_report
-//    file "*_data"
-//    val prefix into multiqc_prefix
-//
-//    script:
-//    prefix = fastqc[0].toString() - '_fastqc.html' - 'fastqc/'
-//    rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
-//    rfilename = custom_runName ? "--filename " + custom_runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report" : ''
-//    """
-//    multiqc -f $rtitle $rfilename --config $multiqc_config .
-//    """
-//}
+/**
+ * STEP7 MultiQC
+ */
+
+// MultiQC of all the results
+process multiqc {
+    tag "$prefix"
+    publishDir "${params.outdir}/MultiQC", mode: 'copy'
+
+    input:
+    file multiqc_config
+    file ('fastqc/*') from fastqc_results.collect()
+    file ('software_versions/*') from software_versions_yaml
+    file ('alignment/*') from alignment_logs.collect()
+
+    output:
+    file "*multiqc_report.html" into multiqc_report
+    file "*_data"
+    val prefix into multiqc_prefix
+
+    script:
+    prefix = fastqc[0].toString() - '_fastqc.html' - 'fastqc/'
+    rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
+    rfilename = custom_runName ? "--filename " + custom_runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report" : ''
+    """
+    multiqc -f $rtitle $rfilename --config $multiqc_config .
+    """
+}
 
 
 /*
