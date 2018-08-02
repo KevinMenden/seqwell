@@ -17,33 +17,21 @@ vim: syntax=groovy
 def helpMessage() {
     log.info"""
     =========================================
-     NF-CAGEseq v${version}
+     SeqWell v${version}
     =========================================
     Usage:
 
     The typical command for running the pipeline is as follows:
 
-    nextflow run KevinMenden/NF-CAGEseq --reads '*.fastq.gz' -profile docker
-
-    For paired-end reads specify --reads '*{1,2}.fastq.gz' or a similar pattern matching your filenames
+    nextflow run kevinmenden/seqwell --reads '*.fastq.gz' -profile docker
 
     Mandatory arguments:
       --reads                       Path to input data (must be surrounded with quotes)
       -profile                      Hardware config to use. docker / aws
 
-    Options:
-      --pairedEnd                   Specifies that the input is paired end reads (Currently not supported)
-      --aligner                     Specify which aligner should be used. One of: bowtie | star . Default: bowtie
-
-    Trimming:
-      --cutEcop                     [true|false] Whether the 5' EcoP15I regognition site should be removed. Default is true.
-      --cutLinker                   [true|false] Whether the 3' linker should be removed. Default is true.
-      --trimming                    [true | false] Whether trimming should be performed. Default is true.
-
     References                      If not specified in the configuration file or you wish to overwrite any of the references.
       --fasta                       Path to Fasta reference
       --gtf                         Path to GTF reference
-      --genome                      Name of iGenomes genome
 
     Other options:
       --outdir                      The output directory where the results will be saved
@@ -74,15 +62,11 @@ params.fasta = params.genome ? params.genomes[ params.genome ].fasta ?: false : 
 params.multiqc_config = "$baseDir/conf/multiqc_config.yaml"
 params.reads = "data/*{1,2}.fastq.gz"
 params.outdir = './results'
-params.aligner = 'bowtie'
 params.gtf = false
-params.min_aln_length = 15
 params.star_index = false
+params.build_dict = false
 params.saveReference = false
-params.cutEcop = true
-params.cutLinker = true
-params.trimming = true
-params.cutG = true
+params.min_genes = 50
 
 multiqc_config = file(params.multiqc_config)
 
@@ -110,7 +94,7 @@ ${read_files_fastqc.length()}
 
 // Header log info
 log.info "========================================="
-log.info " NF-CAGEseq v${version}"
+log.info " SeqWell v${version}"
 log.info "========================================="
 def summary = [:]
 summary['Run Name']     = custom_runName ?: workflow.runName
@@ -162,7 +146,7 @@ if( params.gtf ){
     Channel
             .fromPath(params.gtf)
             .ifEmpty { exit 1, "GTF annotation file not found: ${params.gtf}" }
-            .into { gtf_makeSTARindex; gtf_star; gtf_bowtie; gtf_buildBowtieIndex}
+            .into { gtf_makeSTARindex; gtf_star; gtf_tag_exon; gtf_buildBowtieIndex}
 }
 // Load STAR index
 if ( params.star_index){
@@ -186,7 +170,6 @@ process get_software_versions {
     fastqc --version > v_fastqc.txt
     multiqc --version > v_multiqc.txt
     STAR --version > v_star.txt
-    cutadapt --version > v_cutadapt.txt
     scrape_software_versions.py > software_versions_mqc.yaml
     """
 }
@@ -228,16 +211,11 @@ process fastqToBam {
 
     script:
     """
-    picard FastqToSam F1=${reads[0]} F2=${reads[1]} O=test.bam RG=null
+    picard FastqToSam F1=${reads[0]} F2=${reads[1]} O=${reads[0].baseName}.bam RG=null
     """
 
 }
 
-/*
-STEP 3 Tag bam file
-Use R1 to tag each read according to cell and molecular barcode
-Filter for reads with low quality barcodes
- */
 /**
  * Tag reads according to cell and molecular barcodes
  * Filter for reads with low quality barcodes
@@ -248,12 +226,16 @@ process tagbam {
     input:
     file ua_bam from fastq_to_bam_results
 
+
+    output:
+    file "*tagged_filtered.bam" into tagged_bam
+
     script:
     """
     TagBamWithReadSequenceExtended \\
     INPUT=$ua_bam \\
-    OUTPUT=unaligned_tagged_Cell.bam \\
-    SUMMARY=unaligned_tagged_Cell.bam_summary.txt \\
+    OUTPUT=${ua_bam.baseName}.unaligned_tagged_Cell.bam \\
+    SUMMARY=${ua_bam.baseName}.unaligned_tagged_Cell.bam_summary.txt \\
     BASE_RANGE=1-12 \\
     BASE_QUALITY=10 \\
     BARCODED_READ=1 \\
@@ -263,8 +245,8 @@ process tagbam {
 
 
     TagBamWithReadSequenceExtended \\
-    INPUT=unaligned_tagged_Cell.bam \\
-    OUTPUT=unaligned_tagged_CellMolecular.bam \\
+    INPUT=${ua_bam.baseName}.unaligned_tagged_Cell.bam \\
+    OUTPUT=${ua_bam.baseName}.unaligned_tagged_CellMolecular.bam \\
     SUMMARY=unaligned_tagged_CellMolecular.bam_summary.txt \\
     BASE_RANGE=13-20 \\
     BASE_QUALITY=10 \\
@@ -275,13 +257,9 @@ process tagbam {
 
     FilerBam \\
     TAG_REJECT=XQ \\
-    INPUT=unaligned_tagged_CellMolecular.bam \\
-    OUTPUT=unaligned_tagged_filtered.bam
+    INPUT=${ua_bam.baseName}.unaligned_tagged_CellMolecular.bam \\
+    OUTPUT=${ua_bam.baseName}.unaligned_tagged_filtered.bam
     """
-
-    output:
-    file "*tagged_filtered.bam" into tagged_bam
-    ""
 }
 
 
@@ -298,23 +276,23 @@ process trimming {
     """
     TrimStartingSequence \\
     INPUT=$tbam \\
-    OUTPUT=unaligned_tagged_trimmed_smart.bam \\
-    OUTPUT_SUMMARY=adapter_trimming_report.txt \\
+    OUTPUT=${tbam.baseName}.trimmed_smart.bam \\
+    OUTPUT_SUMMARY=${tbam.baseName}.adapter_trimming_report.txt \\
     SEQUENCE=AAGCAGTGGTATCAACGCAGAGTGAATGGG \\
     MISMATCHES=0 \\
     NUM_BASES=5
     
     PolyATrimmer \\
-    INPUT=unaligned_tagged_trimmed_smart.bam \\
-    OUTPUT=unaligned_mc_tagged_polyA_filtered.bam \\
-    OUTPUT_SUMMARY=polyA_trimming_report.txt \\
+    INPUT=${tbam.baseName}.trimmed_smart.bam \\
+    OUTPUT=${tbam.baseName}.polyA_filtered.bam \\
+    OUTPUT_SUMMARY=${tbam.baseName}.polyA_trimming_report.txt \\
     MISMATCHES=0 \\
     NUM_BASES=6
     """
 
     output:
-    file "*mc_tagged_polyA_filtered.bam" into filtered_bam
-    file "*" into trimming results
+    file "*polyA_filtered.bam" into filtered_bam
+    file "*" into trimming_results
 }
 filtered_bam.into { filtered_bam_fastq; filtered_bam_merge }
 
@@ -334,7 +312,7 @@ process bamToFastq {
     """
     picard SamToFastq \\
     INPUT=$fbam \\
-    FASTQ=unaligned_mc_tagged_filtered.fastq
+    FASTQ=${$fbam}.fastq
     """
 
 
@@ -392,15 +370,34 @@ if(!params.star_index && fasta){
         file "*Log.out" into star_log
 
         script:
-        prefix = reads[0].toString() - ~/(.trimmed)?(\.fq)?(\.fastq)?(\.gz)?$/
+        prefix = reads.toString() - ~/(.trimmed)?(\.fq)?(\.fastq)?(\.gz)?$/
         """
         STAR --genomeDir $index \\
             --readFilesIn $reads  \\
             --runThreadN ${task.cpus} \\
             --outFileNamePrefix $prefix \\
          """ }
-// Split Star results
-star_aligned.into { sam_; bam_rseqc }
+
+/**
+ * Build sequence dict if not available
+ */
+if(params.build_dict){
+    process buildSequenceDict {
+        publishDir "${params.outdir}/reference_genome", mode: 'copy'
+
+        input:
+        file fasta from fasta
+
+        output:
+        file "*.fa*" into fasta_ref
+        file "*.dict" into fasta_dict
+
+        script:
+        """
+        picard 
+        """
+    }
+}
 
 /**
  * Sort Sam file and merge alignment
@@ -419,41 +416,64 @@ process sort_and_merge {
     script:
     """
     picard SortSam \\
-    I=$merged_bam \\
-    O=aligned.sorted.bam \\
+    I=$mapped_sam \\
+    O=${mapped_sam.baseName}.sorted.bam \\
     SO=queryname
     
     picard MergeBamAlignment \\
     REFERENCE_SEQUENCE=$fasta \\
     UNMAPPED_BAM=$fbam \\
-    ALIGNED_BAM=aligned.sorted.bam
+    ALIGNED_BAM=${mapped_sam.baseName}.sorted.bam \\
+    OUTPUT=${mapped_sam.baseName}.merged.bam \\
+    INCLUDE_SECONDARY_ALIGNMENTS=false \\
+    PAIRED_RUN=false    
     """
 }
 
 /**
- * Mapping QC
+ * Tag Read with Gene Exon
  */
-process rseqc {
-    tag "${bam_rseqc.baseName}"
-    publishDir "${params.outdir}/rseqc", mode: 'copy',
-            saveAs: {filename ->
-                if (filename.indexOf("bam_stat.txt") > 0)          "bam_stat/$filename"
-            }
+process tagGeneExon {
+    publishDir "${params.outdir}/Counts", mode: 'copy'
 
     input:
-    file bam_rseqc
+    file mbam from merged_bam
+    file gtf from gtf_tag_exon
 
     output:
-    file "*.txt" into rseqc_results
+    file "*bam" into exon_tagged_bam
 
     script:
     """
-    bam_stat.py -i ${bam_rseqc} > ${bam_rseqc.baseName}.bam_stat.txt
+    TagReadWithGeneExon \\
+    I=$mbam \\
+    O=${mbam.baseName}.exonTagged.bam \\
+    ANNOTATIONS_FILE=$gtf \\
+    TAG=GE
     """
-
 }
 
+/**
+ * Create Digital Gene Expression matrix
+ */
+process digitalGeneExpression {
+    publishDir "${params.outdir}/Counts", mode: 'copy'
 
+    input:
+    file etbam from exon_tagged_bam
+
+    output:
+    "*" into dge_matrix
+
+    script:
+    """
+    DigitalExpression \\
+    I=$etbam \\
+    O=${etbam.baseName}.dge.txt.gz \\
+    SUMMARY=${etbam.baseName}.dge.summary.txt
+    MIN_NUM_GENES_PER_CELL=$params.min_genes 
+    """
+}
 
 
 /**
@@ -490,10 +510,8 @@ process multiqc {
 
     input:
     file multiqc_config
-    file (fastqc: 'trimmed/*') from trimmed_fastqc_results.collect()
-    file ('trimmed/*') from cutadapt_results.collect()
+    file ('fastqc/*') from fastqc_results.collect()
     file ('software_versions/*') from software_versions_yaml
-    file ('rseqc/*') from rseqc_results.collect()
     file ('alignment/*') from alignment_logs.collect()
 
     output:
@@ -515,5 +533,5 @@ process multiqc {
  * Completion notification
  */
 workflow.onComplete {
-    log.info "[NF-CAGEseq] Pipeline Complete"
+    log.info "SeqWell Pipeline Complete"
 }
