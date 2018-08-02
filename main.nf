@@ -192,9 +192,8 @@ process get_software_versions {
 }
 
 
-
-/*
- * STEP 1 - FastQC
+/**
+ * FastQC
  */
 process fastqc {
     tag "$name"
@@ -213,8 +212,9 @@ process fastqc {
     """
 }
 
-/*
-STEP 2 - Create queryname sorted, unmapped BAM from FastQ files
+
+/**
+ * Create query name sorted, unmapped BAM from FastQ files
  */
 process fastqToBam {
     tag "$name"
@@ -237,6 +237,10 @@ process fastqToBam {
 STEP 3 Tag bam file
 Use R1 to tag each read according to cell and molecular barcode
 Filter for reads with low quality barcodes
+ */
+/**
+ * Tag reads according to cell and molecular barcodes
+ * Filter for reads with low quality barcodes
  */
 process tagbam {
     publishDir "${params.outdir}/bam", mode: 'copy'
@@ -280,8 +284,9 @@ process tagbam {
     ""
 }
 
-/*
-STEP 4 Read trimming
+
+/**
+ * Trim reads at 5'-end
  */
 process trimming {
     publishDir "${params.outdir}/bam", mode: 'copy'
@@ -311,15 +316,19 @@ process trimming {
     file "*mc_tagged_polyA_filtered.bam" into filtered_bam
     file "*" into trimming results
 }
+filtered_bam.into { filtered_bam_fastq; filtered_bam_merge }
 
-/*
-STEP 5 Convert to Fastq
+/**
+ * Convert back to FastQ
  */
 process bamToFastq {
     publishDir "${params.outdir}/fastq", mode: 'copy'
 
     input:
-    file fbam from filtered_bam
+    file fbam from filtered_bam_fastq
+
+    output:
+    file "*fastq" into tagged_filtered_fastq
 
     script:
     """
@@ -328,13 +337,12 @@ process bamToFastq {
     FASTQ=unaligned_mc_tagged_filtered.fastq
     """
 
-    output:
-    file "*fastq" into tagged_filtered_fastq
+
 }
 
 
-/*
- * PREPROCESSING - Build STAR index
+/**
+ * Build STAR index if not available
  */
 if(!params.star_index && fasta){
     process makeSTARindex {
@@ -356,7 +364,7 @@ if(!params.star_index && fasta){
             --runMode genomeGenerate \\
             --runThreadN ${task.cpus} \\
             --sjdbGTFfile $gtf \\
-            --sjdbOverhang 50 \\
+            --sjdbOverhang 49 \\
             --genomeDir star/ \\
             --genomeFastaFiles $fasta
         """
@@ -365,7 +373,7 @@ if(!params.star_index && fasta){
 
 
 /**
- * READ MAPPING
+ * Map reads using STAR
  */
     process star {
         tag "$prefix"
@@ -375,32 +383,52 @@ if(!params.star_index && fasta){
                     else  filename }
 
         input:
-        file reads from processed_reads
+        file reads from tagged_filtered_fastq
         file index from star_index.collect()
-        file gtf from gtf_star.collect()
 
         output:
-        file '*.bam' into star_aligned
+        file '*.sam' into star_aligned
         file "*.out" into alignment_logs
-        file "*SJ.out.tab"
         file "*Log.out" into star_log
 
         script:
         prefix = reads[0].toString() - ~/(.trimmed)?(\.fq)?(\.fastq)?(\.gz)?$/
         """
         STAR --genomeDir $index \\
-            --sjdbGTFfile $gtf \\
             --readFilesIn $reads  \\
             --runThreadN ${task.cpus} \\
-            --outSAMtype BAM SortedByCoordinate \\
-            --readFilesCommand zcat \\
-            --runDirPerm All_RWX \\
             --outFileNamePrefix $prefix \\
-            --outFilterMatchNmin ${params.min_aln_length}
          """ }
 // Split Star results
-star_aligned.into { bam_count; bam_rseqc }
+star_aligned.into { sam_; bam_rseqc }
 
+/**
+ * Sort Sam file and merge alignment
+ */
+process sort_and_merge {
+    publishDir "${params.outdir}/STAR", mode: 'copy'
+
+    input:
+    file mapped_sam from star_aligned
+    file fbam from filtered_bam_merge
+    file fasta from fasta
+
+    output:
+    file "*bam" into merged_bam
+
+    script:
+    """
+    picard SortSam \\
+    I=$merged_bam \\
+    O=aligned.sorted.bam \\
+    SO=queryname
+    
+    picard MergeBamAlignment \\
+    REFERENCE_SEQUENCE=$fasta \\
+    UNMAPPED_BAM=$fbam \\
+    ALIGNED_BAM=aligned.sorted.bam
+    """
+}
 
 /**
  * Mapping QC
